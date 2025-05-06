@@ -13,24 +13,7 @@ import {
 } from "react-native";
 import { useEffect, useRef, useState } from "react";
 import { CameraView, Camera } from "expo-camera";
-//import { shareAsync } from "expo-sharing";
 import * as MediaLibrary from "expo-media-library";
-
-// Mock price mapping based on detected classes
-const PRICE_MAPPING = {
-  'tea_TajMahal_tea': 2.99,
-  'dettol': 185, 
-    'tea_RedLabel':135,
-    'Maggi':15,
-    'coffee_Bru':300,
-    'Masala_SakthiTurmeric':45,
-    'Toothpaste-Colgate':149,
-    'RKG_ghee':62,
-    'napkins_stayfree':84, 
-    'napkins_Whisper':44,
-    'Mysore Sandal Soap 125 g':42,
-  // Add more product mappings as needed
-};
 
 export default function App() {
   let cameraRef = useRef();
@@ -42,11 +25,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [cart, setCart] = useState([]);
   const [showBill, setShowBill] = useState(false);
+  const [isScanning, setIsScanning] = useState(true);
+  const [showWelcome, setShowWelcome] = useState(true); // NEW
 
   useEffect(() => {
     (async () => {
       const cameraPermission = await Camera.requestCameraPermissionsAsync();
-      const mediaLibraryPermission = await MediaLibrary.requestPermissionsAsync();
+      const mediaLibraryPermission =
+        await MediaLibrary.requestPermissionsAsync();
       setHasCameraPermission(cameraPermission.status === "granted");
       setHasMediaLibraryPermission(mediaLibraryPermission.status === "granted");
     })();
@@ -82,21 +68,19 @@ export default function App() {
       const result = await response.json();
       if (result.success && result.objects.length > 0) {
         const detectedObject = result.objects[0];
-        const productName = detectedObject.class;
-        const price = PRICE_MAPPING[productName] || 0.00;
-        
+
         const newProduct = {
-          name: productName,
-          price: price,
+          name: detectedObject.class,
+          price: detectedObject.price || 0.0,
           confidence: detectedObject.confidence,
-          id: Date.now() // Unique ID for each product
+          id: Date.now(),
         };
-        
+
         setScannedProduct(newProduct);
         setError(null);
         addToCart(newProduct);
       } else {
-        setError("No product detected. Please try again.");
+        setError(result.message || "No product detected. Please try again.");
         setScannedProduct(null);
       }
     } catch (error) {
@@ -112,7 +96,7 @@ export default function App() {
   };
 
   const removeFromCart = (productId) => {
-    setCart(cart.filter(item => item.id !== productId));
+    setCart(cart.filter((item) => item.id !== productId));
   };
 
   const calculateTotal = () => {
@@ -124,6 +108,65 @@ export default function App() {
     setShowBill(false);
   };
 
+  const handlePrintBill = async () => {
+    const groupedItems = {};
+
+    cart.forEach((item) => {
+      if (!groupedItems[item.name]) {
+        groupedItems[item.name] = { name: item.name, quantity: 1 };
+      } else {
+        groupedItems[item.name].quantity += 1;
+      }
+    });
+
+    const itemsToSend = Object.values(groupedItems);
+
+    try {
+      const response = await fetch("http://192.168.99.131:8080/print_bill", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ items: itemsToSend }),
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        alert("Bill printed! Total: $" + result.total.toFixed(2));
+        resetCart();
+      } else {
+        alert("Error printing bill: " + result.error);
+      }
+    } catch (error) {
+      console.error("Print bill error:", error);
+      alert("Failed to connect to server.");
+    }
+  };
+
+  // 👋 Themed Welcome Page
+  if (showWelcome) {
+    return (
+      <SafeAreaView style={styles.welcomeContainer}>
+        <View style={styles.welcomeInner}>
+          <Text style={styles.welcomeTitle}>Welcome to</Text>
+          <Text style={styles.appName}>Self Checkout App</Text>
+          <Image
+            source={require("./assets/grocery.png")}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <TouchableOpacity
+            style={styles.startButton}
+            onPress={() => setShowWelcome(false)}
+          >
+            <Text style={styles.startButtonText}>Start Scanning</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (photo) {
     return (
       <SafeAreaView style={styles.container}>
@@ -132,21 +175,25 @@ export default function App() {
           <ActivityIndicator size="large" color="#0000ff" />
         ) : scannedProduct ? (
           <View style={styles.resultContainer}>
-            <Text style={styles.resultText}>Product: {scannedProduct.name}</Text>
-            <Text style={styles.resultText}>Price: ${scannedProduct.price.toFixed(2)}</Text>
+            <Text style={styles.resultText}>
+              Product: {scannedProduct.name}
+            </Text>
+            <Text style={styles.resultText}>
+              Price: ${scannedProduct.price.toFixed(2)}
+            </Text>
             <Text style={styles.resultText}>Added to cart!</Text>
-            
+
             <View style={styles.buttonRow}>
               <View style={styles.buttonWrapper}>
-                <Button 
-                  title="Scan Another Item" 
-                  onPress={() => setPhoto(null)} 
+                <Button
+                  title="Scan Another Item"
+                  onPress={() => setPhoto(null)}
                 />
               </View>
               <View style={styles.buttonWrapper}>
-                <Button 
-                  title="View Cart" 
-                  onPress={() => setShowBill(true)} 
+                <Button
+                  title="View Cart"
+                  onPress={() => setShowBill(true)}
                   color="green"
                 />
               </View>
@@ -156,23 +203,15 @@ export default function App() {
           <View style={styles.resultContainer}>
             <Text style={styles.errorText}>{error}</Text>
             <View style={styles.buttonWrapper}>
-              <Button 
-                title="Try Again" 
-                onPress={() => setPhoto(null)} 
-              />
+              <Button title="Try Again" onPress={() => setPhoto(null)} />
             </View>
           </View>
         )}
 
-        {/* Bill Modal */}
-        <Modal
-          visible={showBill}
-          animationType="slide"
-          transparent={false}
-        >
+        <Modal visible={showBill} animationType="slide" transparent={false}>
           <View style={styles.modalContainer}>
             <Text style={styles.billHeader}>Your Bill</Text>
-            
+
             <ScrollView style={styles.cartItemsContainer}>
               {cart.length > 0 ? (
                 cart.map((item, index) => (
@@ -180,7 +219,7 @@ export default function App() {
                     <Text style={styles.cartItemText}>
                       {index + 1}. {item.name} - ${item.price.toFixed(2)}
                     </Text>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       onPress={() => removeFromCart(item.id)}
                       style={styles.removeButton}
                     >
@@ -200,20 +239,19 @@ export default function App() {
             </View>
 
             <View style={styles.modalButtons}>
-              <Button 
-                title="Continue Shopping" 
-                onPress={() => setShowBill(false)} 
+              <Button
+                title="Continue Shopping"
+                onPress={() => {
+                  setShowBill(false);
+                  setIsScanning(true);
+                }}
               />
-              <Button 
-                title="Print Bill" 
-                onPress={() => alert("Bill printed!")} 
+              <Button
+                title="Print Bill"
+                onPress={handlePrintBill}
                 color="green"
               />
-              <Button 
-                title="Clear Cart" 
-                onPress={resetCart} 
-                color="red"
-              />
+              <Button title="Clear Cart" onPress={resetCart} color="red" />
             </View>
           </View>
         </Modal>
@@ -231,13 +269,19 @@ export default function App() {
         <View style={styles.cameraButtonContainer}>
           <Button title="Take Picture" onPress={takePic} />
           {cart.length > 0 && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.cartBadge}
               onPress={() => setShowBill(true)}
             >
               <Text style={styles.cartBadgeText}>{cart.length}</Text>
             </TouchableOpacity>
           )}
+          <TouchableOpacity
+            style={styles.backHomeButton}
+            onPress={() => setShowWelcome(true)}
+          >
+            <Text style={styles.backHomeText}>🏠 Back to Home</Text>
+          </TouchableOpacity>
         </View>
       </CameraView>
       <StatusBar style="auto" />
@@ -251,27 +295,27 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
   },
   camera: {
     flex: 1,
   },
   cameraButtonContainer: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 30,
-    alignSelf: 'center',
+    alignSelf: "center",
     backgroundColor: "rgba(255,255,255,0.7)",
     padding: 15,
     borderRadius: 30,
   },
   preview: {
-    width: '100%',
-    height: '60%',
+    width: "100%",
+    height: "60%",
   },
   resultContainer: {
     padding: 20,
-    width: '100%',
-    backgroundColor: 'white',
+    width: "100%",
+    backgroundColor: "white",
   },
   resultText: {
     fontSize: 18,
@@ -280,82 +324,140 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 18,
     marginVertical: 5,
-    color: 'red',
+    color: "red",
   },
   buttonWrapper: {
     margin: 5,
   },
   buttonRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginTop: 15,
   },
   modalContainer: {
     flex: 1,
     padding: 20,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
   },
   billHeader: {
     fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontWeight: "bold",
+    textAlign: "center",
     marginVertical: 20,
   },
   cartItemsContainer: {
     flex: 1,
   },
   cartItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     padding: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: "#eee",
   },
   cartItemText: {
     fontSize: 16,
   },
   removeButton: {
-    backgroundColor: '#ff4444',
+    backgroundColor: "#ff4444",
     padding: 8,
     borderRadius: 5,
   },
   removeButtonText: {
-    color: 'white',
+    color: "white",
   },
   emptyCartText: {
-    textAlign: 'center',
+    textAlign: "center",
     marginTop: 50,
     fontSize: 18,
-    color: '#888',
+    color: "#888",
   },
   totalContainer: {
     padding: 20,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: "#eee",
   },
   totalText: {
     fontSize: 20,
-    fontWeight: 'bold',
-    textAlign: 'right',
+    fontWeight: "bold",
+    textAlign: "right",
   },
   modalButtons: {
     gap: 10,
     marginBottom: 20,
   },
   cartBadge: {
-    position: 'absolute',
+    position: "absolute",
     top: -10,
     right: -10,
-    backgroundColor: 'red',
+    backgroundColor: "red",
     borderRadius: 15,
     width: 30,
     height: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   cartBadgeText: {
-    color: 'white',
-    fontWeight: 'bold',
+    color: "white",
+    fontWeight: "bold",
+  },
+
+  // 🎨 Themed Welcome Styles
+  welcomeContainer: {
+    flex: 1,
+    backgroundColor: "#f5f6fa",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  welcomeInner: {
+    alignItems: "center",
+    padding: 20,
+  },
+  welcomeTitle: {
+    fontSize: 28,
+    color: "#2f3640",
+    fontWeight: "bold",
+  },
+  appName: {
+    fontSize: 36,
+    color: "#44bd32",
+    fontWeight: "900",
+    marginBottom: 20,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    marginBottom: 30,
+  },
+  startButton: {
+    backgroundColor: "#44bd32",
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  startButtonText: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  backHomeButton: {
+    marginTop: 10,
+    backgroundColor: "#2f3640",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    marginTop: 15,
+    alignSelf: "center",
+  },
+  backHomeText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
   },
 });
